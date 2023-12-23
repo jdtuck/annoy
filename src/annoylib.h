@@ -206,19 +206,21 @@ inline T euclidean_distance(const T* x, const T* y, int f) {
 template<typename T>
 inline T elastic_distance(const T* x, const T* y, int f) {
   double alpha = 0.5;
+  arma::fvec q0i(const_cast<float*>(x), f);
+  arma::vec q0 = conv_to<vec>::from(q0i);
+  arma::fvec q1i(const_cast<float*>(y), f);
+  arma::vec q1 = conv_to<vec>::from(q1i);
 
   T tst = 0.0;
   for (int i = 0; i < f; ++i) {
-    const T x = (*x - *y);
-    tst += x * x;
+    const T tmp = (*x - *y);
+    tst += tmp * tmp;
   }
   T dist = 0.0;
   if (tst == 0){
     dist = 0.0;
   }
   else{
-    arma::vec q0((double *) x, f, false);
-    arma::vec q1((double *) y, f);
 
     arma::vec gam0 = rlbfgs_optim(q0, q1);
     arma::vec time = arma::linspace(0,1,f);
@@ -257,6 +259,8 @@ inline T elastic_distance(const T* x, const T* y, int f) {
     T dp = std::acos(q1dotq2);
 
     dist = (1-alpha) * da + alpha * dp;
+    
+    return dist;
 
   }
 }
