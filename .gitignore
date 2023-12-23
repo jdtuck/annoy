@@ -6,6 +6,7 @@ build/
 dist/
 .vscode/
 *.pdb
+.eggs/
 
 MANIFEST
 *.py[cod]
