@@ -25,7 +25,9 @@
 #include <stdlib.h>
 #include <sys/types.h>
 #include <fcntl.h>
+#include "rbfgs.h"
 #include <stddef.h>
+#include "armadillo"
 
 #if defined(_MSC_VER) && _MSC_VER == 1500
 typedef unsigned char     uint8_t;
@@ -201,6 +203,64 @@ inline T euclidean_distance(const T* x, const T* y, int f) {
   return d;
 }
 
+template<typename T>
+inline T elastic_distance(const T* x, const T* y, int f) {
+  double alpha = 0.5;
+
+  T tst = 0.0;
+  for (int i = 0; i < f; ++i) {
+    const T x = (*x - *y);
+    tst += x * x;
+  }
+  T dist = 0.0;
+  if (tst == 0){
+    dist = 0.0;
+  }
+  else{
+    arma::vec q0((double *) x, f, false);
+    arma::vec q1((double *) y, f);
+
+    arma::vec gam0 = rlbfgs_optim(q0, q1);
+    arma::vec time = arma::linspace(0,1,f);
+    arma::vec gam(f);
+    gam = (gam0 - gam0[0]) / (gam0[f-1] - gam0[0]);
+    arma::vec gam_dev(f);
+    gam_dev = grad(gam, 1.0/(f-1));
+
+    arma::vec tmp;
+    arma::vec time_new;
+    time_new = (time[f-1]-time[0]) * gam + time[0];
+    arma::interp1(time, q1, time_new, tmp);
+
+    arma::vec qw;
+    qw = tmp % arma::sqrt(gam_dev);
+
+    arma::vec y;
+    y = arma::square(qw-q0);
+
+    arma::vec dd;
+    dd = arma::diff(time);
+    tmp = dd % (y.rows(0,f-2)+y.rows(1,f-1))/2;
+    double out1 = arma::accu(tmp);
+    T da = std::sqrt(arma::accu(tmp));
+
+    arma::vec psi;
+    psi = arma::sqrt(grad(gam, 1.0/(f-1)));
+    arma::mat int_temp;
+    int_temp = arma::trapz(time, psi);
+    double q1dotq2 = int_temp[0];
+    if (q1dotq2 > 1){
+      q1dotq2 = 1;
+    } else if (q1dotq2 < -1){
+      q1dotq2 = -1;
+    }
+    T dp = std::acos(q1dotq2);
+
+    dist = (1-alpha) * da + alpha * dp;
+
+  }
+}
+
 #ifdef ANNOYLIB_USE_AVX
 // Horizontal single sum of 256bit vector.
 inline float hsum256_ps_avx(__m256 v) {
@@ -256,6 +316,7 @@ inline float manhattan_distance<float>(const float* x, const float* y, int f) {
     y++;
   }
   return result;
+
 }
 
 template<>
@@ -867,6 +928,37 @@ struct Euclidean : Minkowski {
   }
   static const char* name() {
     return "euclidean";
+  }
+
+};
+
+struct Elastic : Minkowski {
+  template<typename S, typename T>
+  static inline T distance(const Node<S, T>* x, const Node<S, T>* y, int f) {
+    return elastic_distance(x->v, y->v, f);    
+  }
+  template<typename S, typename T, typename Random>
+  static inline void create_split(const vector<Node<S, T>*>& nodes, int f, size_t s, Random& random, Node<S, T>* n) {
+    Node<S, T>* p = (Node<S, T>*)alloca(s);
+    Node<S, T>* q = (Node<S, T>*)alloca(s);
+    two_means<T, Random, Elastic, Node<S, T> >(nodes, f, random, false, p, q);
+
+    for (int z = 0; z < f; z++)
+      n->v[z] = p->v[z] - q->v[z];
+    Base::normalize<T, Node<S, T> >(n, f);
+    n->a = 0.0;
+    for (int z = 0; z < f; z++)
+      n->a += -n->v[z] * (p->v[z] + q->v[z]) / 2;
+  }
+  template<typename T>
+  static inline T normalized_distance(T distance) {
+    return sqrt(std::max(distance, T(0)));
+  }
+  template<typename S, typename T>
+  static inline void init_node(Node<S, T>* n, int f) {
+  }
+  static const char* name() {
+    return "elastic";
   }
 
 };
